@@ -1,0 +1,6 @@
+compile-snapshot:
+  extends: .compile-snapshot
+
+build-docker:
+  extends: .build-docker
+

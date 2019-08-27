@@ -1,0 +1,54 @@
+variables:
+  BACHATA_CI_ENABLE_COMPILE_SNAPSHOT: 1
+  BACHATA_CI_ENABLE_BUILD_DOCKER: 1
+
+stages:
+  - dummy
+  - compile
+  - build
+  - test
+
+.compile:
+  stage: compile
+  script:
+    - cd ~/openwrt
+    - echo "CONFIG_DEVEL=y" > .config
+    - echo "CONFIG_SRC_TREE_OVERRIDE=y" >> .config
+    - make defconfig
+    - ./scripts/feeds update base $PROJECT_FEED
+    - ln -s "$CI_PROJECT_DIR/.git/" ~/openwrt/feeds/$PROJECT_FEED/$PROJECT_PATH/$PROJECT_NAME/git-src
+    - ./scripts/feeds install $PROJECT_NAME
+    - make package/$PROJECT_NAME/{clean,compile} -j$(nproc) || make package/$PROJECT_NAME/compile V=s
+    - cp ./bin/packages/x86_64/$PROJECT_FEED/$PROJECT_NAME*.ipk "$CI_PROJECT_DIR/"
+    - cp ./staging_dir/target-x86_64_musl/root-x86/$PROJECT_DEST "$CI_PROJECT_DIR/$PROJECT_NAME"
+  artifacts:
+    paths:
+    - "$PROJECT_NAME"
+    - "$PROJECT_NAME*ipk"
+
+.compile-snapshot:
+  image: openwrtorg/sdk
+  extends: .compile
+  only:
+    variables:
+      - $BACHATA_CI_ENABLE_COMPILE_SNAPSHOT =~ /^(1|yes|true)$/
+
+.build-docker:
+  image: docker:latest
+  stage: build
+  services:
+    - docker
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - wget -O "$CI_PROJECT_DIR/Dockerfile" https://raw.githubusercontent.com/aparcar/bachata-ci/master/Dockerfile
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG" --build-arg PROJECT_NAME="$PROJECT_NAME" --build-arg PROJECT_DEST="$PROJECT_DEST" "$CI_PROJECT_DIR"
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
+  only:
+    variables:
+      - $BACHATA_CI_ENABLE_BUILD_DOCKER =~ /^(1|yes|true)$/
+
+.test-docker:
+  image: "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
+  stage: test
+
